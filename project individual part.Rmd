@@ -1,0 +1,365 @@
+---
+title: "Predicting the price of Apartments in Dubai"
+author: "Nafis Ahmed Munim"
+date: "6/1/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message=FALSE, warning=FALSE, fig.height = 3, fig.width = 6)
+library(tidyverse)
+library(knitr)
+library(caret)
+library(corrplot)
+library(skimr)
+```
+
+## Abstract
+
+We have a dataset of 500 apartments in Dubai which is our training dataset and we also have a Dataset with 500 other apartments in dubai which doesn't include their price in the dataset we try to the best model from our training data to predict the price of the apartments in the test data . We use different techniques to find the best model and do the best prediction for the apartments in the test data. We use root mean square errors and root mean square predicted errors to find our best model which doesn't overfit and gives the best possible prediction from the training dataset. We found that best model to predict the price best in this project.
+\newpage
+
+
+## Introduction
+
+We use the training data to predict the prices for the test data and we have 38 variables in our training dataset. We try to analyze the important variables which contribute to the price of the apartments. We will try to build a model with price as our response variable and other explanatory varibales from the data. We are building almost 8 models and from that we will do cross validation and see which model works the best for the test dataset and predicts the price of the apartments the best. We have also done a bit of varibale engineering to combine some of the varibales which could make change in the response variable and as there are a lot of variables in the datset we try to combine varibales which seemed to be same categorized. 
+
+
+## Exploratory Analysis
+
+```{r}
+Train <- read.csv("Training_Data.csv")
+Test <- read.csv("Test_Data.csv")
+```
+We can see here that both the test and the train datset has the same amount of rows and the same amount of variables and also we can see that there are no values for the price in the test data and that's why we will predict the prices. Also we can see that there are are total 8 numerical variable, 2 character and 28 logical variable in the train datset and also we can see that the test dataset has the same variables abut some of the logical variables used in the train dataset is as a character variable in the test dataset. As we will primarily use the training data for the model that shouldn't be a concern now. Also we can see that the price variable has all the values missing as we are predicting these values. Other than that there are no more missing values for any of the variables for the training or the test dataset which is a great thing to start. 
+
+```{r}
+#It's ok to provide raw R output from summary() or glimpse()
+
+summary(Train)
+summary(Test)
+skim(Train)
+skim(Test)
+```
+
+```{r, fig.cap="AirBnB Prices"}
+ggplot(data=Train, aes(x=price)) + geom_histogram(fill="blue", color="white") + 
+  ylab("frequency") + xlab("Price") +ggtitle("Distribution of Prices")
+```
+From the graph of distribution of prices for the 500 apartments we can see that there are a lot of outliers in the right which means there are some apartments which are very overpriced and other than the outliers the graph looks fine to work with
+
+
+```{r, fig.cap="Price Distribution by Neighborhood"}
+ggplot(data=Train, aes(y=price, x=neighborhood)) + geom_violin( aes(fill=neighborhood)) + geom_boxplot(width=0.2)
+```
+Now we have tried to graph the prices of the apartments according to the neighborhood and we can see that there are a lot of neighborhoods in the city and we can see that the price differs a lot by neighborhood as we can see from the graph that the median price of the appartments differs a lot according to the neigborhoods they are situated in. We have created a graph below with the mean price of the apartments according to the neighborhoods which shows that there might be a relationship between the neighborhood and the price ans we should add this in the model. But we have to do some varibale or feature engineering to the variable as htere are a lot of neighborhoods which have a very little apartments and that might be a problem while predicting in the test data or doing cross validation. We will do that later on in the project. 
+
+```{r}
+T1 <- Train %>% group_by(neighborhood) %>% summarize(Mean_Price = mean(price), 
+                                             SD_Price = sd(price), 
+                                             N = n())
+kable(T1, caption="Average Price by Neighborhood")
+```
+
+Now we if we see the graph of price for the number of bedrooms we can see that there is a upward tren in price as the bedrooms number increases and we can see ht efit line which is also upward sloping.
+```{r, fig.cap="Price by Number of Bedrooms"}
+ggplot(data=Train, aes(x=no_of_bedrooms, y=price)) + geom_point() + stat_smooth(method="lm")
+```
+
+Now we try to find out some of the correlations between the quantitative variables in the dataset and we have showed a correlation graph to find any highly correlation between the varibales and we need to avoid the multicollinearity. We can see from the graph that there is a very strong relationship between the number of bedrooms and number of bathrooms and also a very strong relationship between the latitude and the longtitude and the id and x . So we think we should avoid adding more than one from those to avoid the multicollinearity. And also we know that as we ass the neighborhood we don't need to use latitude or longtitude as both of them describes the same variability. 
+
+```{r, fig.cap="Correlation Plot for Quantitative Variables"}
+Train_num <- select_if(Train, is.numeric)
+C <- cor(Train_num, use="pairwise.complete.obs")
+corrplot(C)
+```
+We graph the size in sqft and the price and we can see an upward in the graph and there might be a relation between them 
+```{r, fig.cap="Price by size in sqft"}
+ggplot(data=Train, aes(x=size_in_sqft, y=price)) + geom_point() + stat_smooth(method="lm") + xlab("Size in square feet ") + ggtitle("Price by size in sqft")
+```
+
+```{r}
+cor(Train$no_of_bedrooms, Train$size_in_sqft)
+cor(Train$no_of_bedrooms, Train$no_of_bathrooms)
+```
+Here we can see that the size in sqft the bedrooms and the bathrooms have pretty much very strong relation among them. So we can add one or two of them to avoid collinearity as they ar ehighly correlated. 
+
+Then we try to put a table for the security variable and price as security is very important measure for an apartment , intuitively. We can see that price differs a lot according to the security status of the apartment and we might add this to the model of best fit
+
+```{r}
+T3 <- Train %>% group_by(security) %>% summarize(Mean_Price = mean(price), 
+                                             SD_Price = sd(price), 
+                                             N = n())
+kable(T3, caption="Average Price by Security provided ")
+```
+
+## Feature Engineering
+We convert the neighborhood and the quality to factor on both the test and the train data. 
+
+```{r}
+Train$neighborhood <- as.factor(Train$neighborhood)
+Train$quality <- as.factor(Train$quality)
+Test$neighborhood <- as.factor(Test$neighborhood)
+Train$quality <- as.factor(Train$quality)
+```
+We create a table to see if there is any possible relation between the quality of the apartment with the price and we create a graph with the mean price of the rooms of each quality. we can see from the table that the price differs by the quality . but the price of medium and low is very close but still there is differenc eso we might add the varibale in our model. 
+
+```{r}
+T2 <- Train %>% group_by(quality) %>% summarize(Mean_Price = mean(price),
+                                                  SD_Price = sd(price), 
+                                                   N = n())
+kable(T2, caption="Average Price by Room quality")
+```
+
+
+
+#More variable engineering:
+
+1. Combine the variables like shared pool , shared gym and shared spa and create a new variable poolfacilities as they seem to be facilities regarding to pool. 
+we have created such new variable combining kind of same variables and that helped us to work with less amount of variables.
+
+2. AS we have seen that there are a lot of neighborhoods which don't have a lot of apartments and seem to be sub areas. So we try to keep 6 major areas and put the others as 'other' neighbor hood. We have done that for both test and train data sets
+```{r}
+
+
+Train <- mutate(Train, Poolfacilities = Train$shared_pool =="TRUE" | Train$shared_gym == "TRUE" | Train$shared_spa == "TRUE")
+Train <- mutate(Train, PrivateEntertainments = Train$private_garden =="TRUE" | Train$private_gym == "TRUE" | Train$private_jacuzzi=="TRUE" | Train$private_pool=="TRUE"  )
+Train <- mutate(Train, Helpservice = Train$maid_room =="TRUE" | Train$maid_service == "TRUE" | Train$concierge == "TRUE")
+Train <- mutate(Train, Childrenentertainment = Train$childrens_play_area =="TRUE" | Train$childrens_pool == "TRUE" )
+Train <- mutate(Train, Facilities = Train$balcony=="TRUE" | Train$barbecue_area == "TRUE" | Train$networked == "TRUE" | Train$study ==" TRUE")
+Train <- mutate(Train, Environment = Train$vastu_compliant =="TRUE" | Train$view_of_landmark == "TRUE" | Train$view_of_water == "TRUE")
+Train <- mutate(Train, Pools = Train$Poolfacilities =="TRUE" | Train$PrivateEntertainments == "TRUE" )
+
+```
+```{r}
+
+
+Test <- mutate(Test, Poolfacilities = Test$shared_pool =="TRUE" | Test$shared_gym == "TRUE" | Test$shared_spa == "TRUE")
+Test <- mutate(Test, PrivateEntertainments = Test$private_garden =="TRUE" | Test$private_gym == "TRUE" | Test$private_jacuzzi=="TRUE" | Test$private_pool=="TRUE"  )
+Test <- mutate(Test, Helpservice = Test$maid_room =="TRUE" | Test$maid_service == "TRUE" | Test$concierge == "TRUE")
+Test <- mutate(Test, Childrenentertainment = Test$childrens_play_area =="TRUE" | Test$childrens_pool == "TRUE" )
+Test <- mutate(Test, Facilities = Test$balcony=="TRUE" | Test$barbecue_area == "TRUE" | Test$networked == "TRUE" | Test$study ==" TRUE")
+Test <- mutate(Test, Environment = Test$vastu_compliant =="TRUE" | Test$view_of_landmark == "TRUE" | Test$view_of_water == "TRUE")
+Test <- mutate(Test, Pools = Test$Poolfacilities =="TRUE" | Test$PrivateEntertainments == "TRUE" )
+
+```
+
+
+```{r}
+Train <- Train %>% mutate(neighborhood = fct_lump(neighborhood, n=6))
+                              
+```
+
+```{r}
+Test <- Test %>% mutate(neighborhood = fct_lump(neighborhood, n=6))
+```
+```{r, fig.cap="Price Distribution by Neighborhood"}
+ggplot(data=Train, aes(y=price, x=neighborhood)) + geom_violin( aes(fill=neighborhood)) + geom_boxplot(width=0.2)
+```
+
+We plot all the new variables we have created combining some variables which might be important and we will look for relationship with price. 
+```{r, fig.cap="Price Distribution by Covered parking"}
+ggplot(data=Train, aes(y=price, x=covered_parking)) + geom_violin( aes(fill=covered_parking)) + geom_boxplot(width=0.2)
+```
+```{r, fig.cap="Price Distribution by Facilities"}
+ggplot(data=Train, aes(y=price, x=Facilities)) + geom_violin( aes(fill=Facilities)) + geom_boxplot(width=0.2)
+```
+
+```{r, fig.cap="Price Distribution by Poolfacilities"}
+ggplot(data=Train, aes(y=price, x=Poolfacilities)) + geom_violin( aes(fill=Poolfacilities)) + geom_boxplot(width=0.2)
+```
+
+```{r, fig.cap="Price Distribution by Help Service"}
+ggplot(data=Train, aes(y=price, x=Helpservice)) + geom_violin( aes(fill=Helpservice)) + geom_boxplot(width=0.2)
+```
+```{r, fig.cap="Price Distribution by Environment"}
+ggplot(data=Train, aes(y=price, x=Environment)) + geom_violin( aes(fill=Environment)) + geom_boxplot(width=0.2)
+```
+```{r, fig.cap="Price Distribution by Children Entertainment"}
+ggplot(data=Train, aes(y=price, x=Childrenentertainment)) + geom_violin( aes(fill=Childrenentertainment)) + geom_boxplot(width=0.2)
+```
+```{r, fig.cap="Price Distribution by PrivateEntertainments"}
+ggplot(data=Train, aes(y=price, x=PrivateEntertainments)) + geom_violin( aes(fill=PrivateEntertainments)) + geom_boxplot(width=0.2)
+```
+```{r}
+T4 <- Train %>% group_by(unfurnished) %>% summarize(Mean_Price = mean(price),
+                                                  SD_Price = sd(price), 
+                                                   N = n())
+kable(T4, caption="Average Price by Unfurnished or furnished status")
+```
+As we can see that there are some variables among the new one which seems to not affect the price but the unfurnished variable there is a bit difference in mean price between the unfurnisshed and the furnished varibles. 
+## Model Evaluation
+
+We cannot fit a model when there are missing values in the data. We have already seen that there are no missing values in the data set. 
+
+
+
+
+We'll perform 5 repeats of 5-fold cross validation. 
+
+```{r}
+control <- trainControl(method="repeatedcv", number=5, repeats=5 )
+```
+
+
+We consider 8 models:
+
+1. simple linear regression model using only no of bedrooms as explanatory variable.   
+2. multiple regression model with the four quantitative explanatory variables most highly correlated with price.    
+3. same variables as in (2), with interactions included.   
+4. multiple regression model with bedrooms, and two categorical variables: quality, and Neighborhood    
+5. same model as in (4), with interactions included. 
+6. multiple regression model with combination of categorical and quantitative variables mentioned so far.   
+7. model including almost all variables, and leaving out only those that we wouldn't expect to have much relationship with price and have a multicollinearity ( latitude, longitude, id )    
+8. model including all variables in the dataset
+
+```{r, message=FALSE, warning=FALSE, cache=FALSE}
+set.seed(11082020)
+model1 <- train(data=Train, price ~ no_of_bedrooms,  method="lm", trControl=control)
+set.seed(11082020)
+model2 <- train(data=Train, price ~ no_of_bedrooms + no_of_bathrooms + size_in_sqft,  method="lm", trControl=control)
+set.seed(11082020)
+model3 <- train(data=Train, price ~ no_of_bedrooms * no_of_bathrooms * size_in_sqft,  method="lm", trControl=control)
+set.seed(11082020)
+model4 <- train(data=Train, price ~ no_of_bedrooms + neighborhood + quality ,  method="lm", trControl=control)
+set.seed(11082020)
+model5 <- train(data=Train, price ~ no_of_bedrooms * neighborhood * quality ,  method="lm", trControl=control)
+set.seed(11082020)
+model6 <- train(data=Train, price ~ no_of_bedrooms  + neighborhood + quality +  
+                  security + covered_parking + unfurnished + size_in_sqft    ,  method="lm", trControl=control)
+set.seed(11082020)
+#exclude latitude, longitude, id, zipcode , no_of_bathrooms, 
+model7 <- train(data=Train, price ~ quality + no_of_bedrooms + neighborhood + security +  size_in_sqft+
+                  unfurnished + covered_parking +  Helpservice + Facilities + Childrenentertainment + Environment + Pools,  method="lm", trControl=control)
+set.seed(11082020)
+model8 <- train(data=Train, price ~ .,  method="lm", trControl=control)
+```
+
+
+```{r}
+r1 <- model1$results$RMSE
+r2 <- model2$results$RMSE
+r3 <- model3$results$RMSE
+r4 <- model4$results$RMSE
+r5 <- model5$results$RMSE
+r6 <- model6$results$RMSE
+r7 <- model7$results$RMSE
+r8 <- model8$results$RMSE
+Model <- 1:8
+RMSPE <- c(r1, r2, r3, r4, r5, r6, r7, r8)
+T <- data.frame(Model, RMSPE)
+kable(T, caption ="Cross Validation Results")
+```
+
+We also consider predicting log(price), using the same 8 models. 
+
+```{r, message=FALSE, warning=FALSE, cache=FALSE}
+set.seed(11082020)
+model1 <- train(data=Train, log(price) ~ no_of_bedrooms,  method="lm", trControl=control)
+set.seed(11082020)
+model2 <- train(data=Train, log(price) ~ no_of_bedrooms + no_of_bathrooms + size_in_sqft,  method="lm", trControl=control)
+set.seed(11082020)
+model3 <- train(data=Train, log(price) ~ no_of_bedrooms * no_of_bathrooms * size_in_sqft,  method="lm", trControl=control)
+set.seed(11082020)
+model4 <- train(data=Train, log(price) ~ no_of_bedrooms + neighborhood + quality ,  method="lm", trControl=control)
+set.seed(11082020)
+model5 <- train(data=Train, log(price) ~ no_of_bedrooms * neighborhood * quality ,  method="lm", trControl=control)
+set.seed(11082020)
+model6 <- train(data=Train, log(price) ~ no_of_bedrooms  + neighborhood + quality +  size_in_sqft +
+                  security + covered_parking + unfurnished ,  method="lm", trControl=control)
+set.seed(11082020)
+#exclude latitude, longitude, id, zipcode , no_of_bathrooms, Size_in_sqft
+model7 <- train(data=Train, log(price) ~ quality + no_of_bedrooms + neighborhood + security +  size_in_sqft+
+                  unfurnished + covered_parking +  Helpservice + Facilities + Childrenentertainment + Environment + Pools,  method="lm", trControl=control)
+set.seed(11082020)
+model8 <- train(data=Train, log(price) ~ .,  method="lm", trControl=control)
+```
+
+```{r}
+r1 <- model1$results$RMSE
+r2 <- model2$results$RMSE
+r3 <- model3$results$RMSE
+r4 <- model4$results$RMSE
+r5 <- model5$results$RMSE
+r6 <- model6$results$RMSE
+r7 <- model7$results$RMSE
+r8 <- model8$results$RMSE
+Model <- 1:8
+RMSPE <- c(r1, r2, r3, r4, r5, r6, r7, r8)
+T <- data.frame(Model, RMSPE)
+kable(T, caption="Cross Validation Results for Log Model")
+```
+
+We see that model 7 was best at predicting price directly, while model 8 was best at predicting log(price). We can't compare these directly using the R output from Train because RMSPE is computed on different scales. 
+
+Instead, we'll convert the predictions for log(price) back to price, and calculate RMSPE ourselves for these two models. We partition the data into a training set, containing 80% of the data, and a test set, containing the remaining 20%, and repeat this procedure 10 times. This is not true cross-validation, since we aren't dividing into distinct folds, and withholding each fold once, but it has the same effect of evaluating the model on data not used to train it. 
+
+```{r}
+set.seed(11092020)
+
+RMSPE1 <- rep(NA, 10)
+RMSPE2 <- rep(NA, 10)
+
+
+for(i in 1:10){
+samp <- sample(1:500, 100)
+Train2 <- Train[-samp, ]
+Validation <- Train[samp, ]
+M1 <- lm(data=Train2, price ~ quality + no_of_bedrooms + neighborhood + security +  size_in_sqft+
+                  unfurnished + covered_parking +  Helpservice + Facilities + Childrenentertainment + Environment + Pools)
+M2 <- lm(data=Train2,  log(price) ~ . )
+pred1 <- predict(M1, newdata=Validation)
+pred2 <- exp(predict(M2, newdata=Validation))
+RMSPE1[i] <- sqrt(mean((Validation$price - pred1)^2))
+RMSPE2[i] <- sqrt(mean((Validation$price - pred2)^2))
+}
+```
+
+
+```{r}
+r1 <- mean(RMSPE1)
+r2 <- mean(RMSPE2)
+RMSPE <- c(r1, r2)
+Model <- c("Original", "Log of Exp. Vars")
+T <- data.frame(Model, RMSPE)
+kable(T, caption="Comparsion of MSPE for Log and Original Response Scales")
+```
+
+We see that the model that did not use the log transfrom performed better. 
+
+```{r}
+M1 <- lm(data=Train, price ~  quality + no_of_bedrooms + neighborhood + security +  size_in_sqft+
+                  unfurnished + covered_parking +  Helpservice + Facilities + Childrenentertainment + Environment + Pools)
+
+```
+
+
+
+We'll create residual plots for this model. 
+
+```{r, fig.cap="Plots for Model Check"}
+library(gridExtra)
+P1 <- ggplot(data=data.frame(M1$residuals), aes(y=M1$residuals, x=M1$fitted.values)) + geom_point() + ggtitle("Model Residual Plot") + xlab("Predicted Values") + ylab("Residuals")
+P2 <- ggplot(data=data.frame(M1$residuals), aes(x=M1$residuals)) + geom_histogram() + ggtitle("Histogram of Residuals") + xlab("Residual")
+P3 <- ggplot(data=data.frame(M1$residuals), aes(sample = M1$residuals)) + stat_qq() + stat_qq_line() + xlab("Normal Quantiles") + ylab("Residual Quantiles") + ggtitle("Model QQ Plot")
+grid.arrange(P1, P2, P3, ncol=3)
+```
+We can see from the residual plot that there is a funnel shape in the residual plot and thus we should be concerned about the constant variance and we can see that the histogram is a bit right skewed and also there is a curvature in the normal qq plot so we can say that we should be concerned about the normality too but as we are doing prediction here we shouldn't use the log transformation as we have already seen in the RMSPE that the log transformation is not better than the normal model so we are not going to transform the model . Also there we can see that there is a linear relation in the residual plot so we should not worry about the assumptions and use transformation. But we should keep in mind about the model assumptions. 
+```{r}
+p1 <- ggplot(data=Train, aes(x= no_of_bedrooms, y= price)) + geom_point()
+p2 <- ggplot(data=Train, aes(x= size_in_sqft, y=price)) + geom_point()
+p3 <- ggplot(data=Train, aes(x= quality, y=price)) + geom_point()
+p4 <- ggplot(data=Train, aes(x= neighborhood, y=price)) + geom_point()
+p5 <- ggplot(data=Train, aes(x= security, y=price)) + geom_point()
+p6 <- ggplot(data=Train, aes(x= covered_parking, y=price)) + geom_point()
+p7 <- ggplot(data=Train, aes(x= unfurnished, y=price)) + geom_point()
+
+grid.arrange(p1, p2, p3, p4, p5, p6, p7,  nrow=2)
+```
+
+
+
+The residual plots suggest that there are a lot of outliers in almost all the variables which we have seen n the first graph with price too so we shouldn't worry a lot about it but it's worth mentiioning.
+## Conclusions
+
+In conclusion we can say that this model could be the best fit to predict the prices of the apartments in the test data, We have included and analyzed all the possible factors or variables that could help to predict the price perfectly and put in the model or exempt it. We have also checked 8 possible models and checked which one works or perform better and we have came out with a model and this can predict the price better in the test data. 
